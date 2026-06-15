@@ -6,6 +6,7 @@ function safeJsonParse(text: string): Record<string, unknown> {
 }
 import { generateAgnesImage } from "@/lib/agnes";
 import { db } from "@/lib/db";
+import { generateHidreamImage, isHidreamModel } from "@/lib/hidream";
 import { generateIdeogramImage, isIdeogramModel } from "@/lib/ideogram";
 import { saveBuffer } from "@/lib/storage";
 import { errorMessage } from "@/lib/tasks";
@@ -36,7 +37,14 @@ async function executeImageTask(taskId: string) {
   const model = params.model ?? "agnes-image-2.1-flash";
 
   try {
-    const image = isIdeogramModel(model)
+    const image = isHidreamModel(model)
+      ? await generateHidreamImage({
+          prompt: task.prompt,
+          model,
+          seed: Number(params.seed ?? 0),
+          ...parseSize(params.size),
+        })
+      : isIdeogramModel(model)
       ? await generateIdeogramImage({
           prompt: task.prompt,
           model,

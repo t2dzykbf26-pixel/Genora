@@ -34,6 +34,10 @@ export const ERROR_MESSAGES_ZH = {
   IDEOGRAM_NF4_REQUIRES_CUDA: "Ideogram 4 nf4 需要 CUDA 显卡，当前为 CPU 环境，请改用 fp8 或切换环境",
   IDEOGRAM_INFERENCE_FAILED: "Ideogram 4 本地推理失败，请检查 Python 环境、显存和模型权限",
   IDEOGRAM_IMG2IMG_UNSUPPORTED: "Ideogram 4 目前仅支持文生图，暂不支持图生图",
+  HIDREAM_MISSING_MODEL_PATH: "尚未配置 HIDREAM_MODEL_PATH，请在 .env 中指定模型路径",
+  HIDREAM_NOT_INSTALLED: "HiDream 推理环境未安装，请先在 vendor/hidream 中执行 pip install -r requirements.txt",
+  HIDREAM_CUDA_REQUIRED: "HiDream 需要 CUDA 显卡，请确认 GPU 环境",
+  HIDREAM_INFERENCE_FAILED: "HiDream 推理失败，请检查模型路径、显存和 Python 环境",
   DOWNLOAD_FAILED: "下载生成结果失败，请稍后重试",
 } as const;
 
@@ -74,6 +78,10 @@ export function errorCodeFromUnknown(error: unknown): ErrorCode {
   if (/ModuleNotFoundError|No module named|ImportError/i.test(message)) return "IDEOGRAM_NOT_INSTALLED";
   if (/CUDA|bitsandbytes|nf4/i.test(message)) return "IDEOGRAM_NF4_REQUIRES_CUDA";
   if (/ENOENT|spawn|python/i.test(message)) return "IDEOGRAM_NOT_INSTALLED";
+  if (/HIDREAM_MISSING_MODEL_PATH|HIDREAM_MODEL_PATH/i.test(message)) return "HIDREAM_MISSING_MODEL_PATH";
+  if (/HIDREAM_NOT_INSTALLED/i.test(message)) return "HIDREAM_NOT_INSTALLED";
+  if (/HIDREAM_CUDA_REQUIRED/i.test(message)) return "HIDREAM_CUDA_REQUIRED";
+  if (/HIDREAM_INFERENCE_FAILED/i.test(message)) return "HIDREAM_INFERENCE_FAILED";
   if (/download/i.test(message)) return "DOWNLOAD_FAILED";
 
   return "UNKNOWN_ERROR";

@@ -1,6 +1,7 @@
 import { generateAgnesImage, isAgnesConfigured } from "@/lib/agnes";
 import { db } from "@/lib/db";
 import { AppError, errorResponse } from "@/lib/error-codes";
+import { generateHidreamImage, isHidreamConfigured, isHidreamModel } from "@/lib/hidream";
 import { generateIdeogramImage, isIdeogramModel } from "@/lib/ideogram";
 import { saveBuffer } from "@/lib/storage";
 import { errorMessage, publicTask } from "@/lib/tasks";
@@ -22,6 +23,9 @@ export async function POST(request: Request) {
   const model = String(body.model ?? DEFAULT_MODEL);
   const seed = Number(body.seed ?? 0);
   if (!prompt) return errorResponse(new AppError("EMPTY_IMAGE_PROMPT", 400), 400);
+  if (isHidreamModel(model) && !isHidreamConfigured()) {
+    return errorResponse(new AppError("HIDREAM_MISSING_MODEL_PATH", 503), 503);
+  }
   if (model === DEFAULT_MODEL && !isAgnesConfigured("image")) {
     return errorResponse(new AppError("MISSING_AGNES_API_KEY", 503), 503);
   }
@@ -36,7 +40,9 @@ export async function POST(request: Request) {
   });
 
   try {
-    const image = isIdeogramModel(model)
+    const image = isHidreamModel(model)
+      ? await generateHidreamImage({ prompt, model, seed, ...parseSize(size) })
+      : isIdeogramModel(model)
       ? await generateIdeogramImage({ prompt, model, seed, ...parseSize(size) })
       : await generateAgnesImage(prompt);
     const outputPath = await saveBuffer("images", `${task.id}.png`, image);

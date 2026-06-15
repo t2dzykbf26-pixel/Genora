@@ -24,12 +24,12 @@ import {
   type NodeProps,
   type OnConnectEnd,
 } from "@xyflow/react";
-import { VIDEO_POLL_INTERVAL_MS, VIDEO_POLL_MAX_ATTEMPTS } from "@/lib/video-polling";
+import { VIDEO_POLL_INTERVAL_MS } from "@/lib/video-polling";
 
 type Kind = "text" | "image" | "video" | "media-image" | "media-video" | "group";
 type Ratio = "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 type Quality = "720p" | "1k" | "2k" | "4k";
-type ImageModel = "agnes-image-2.1-flash" | "ideogram-4-nf4" | "ideogram-4-fp8";
+type ImageModel = "agnes-image-2.1-flash" | "ideogram-4-nf4" | "ideogram-4-fp8" | "hidream-o1-dev";
 type MotionPreset = "auto" | "push-in" | "pull-out" | "pan-left" | "pan-right" | "tilt-up" | "orbit-left" | "orbit-right" | "low-angle" | "top-down";
 type ThemeTone = "dark" | "light";
 type IconName =
@@ -112,6 +112,7 @@ const IMAGE_MODELS: Array<{ id: ImageModel; label: string; note: string }> = [
   { id: "agnes-image-2.1-flash", label: "Agnes Image 2.1 Flash", note: "API" },
   { id: "ideogram-4-nf4", label: "Ideogram 4 nf4", note: "CUDA" },
   { id: "ideogram-4-fp8", label: "Ideogram 4 fp8", note: "Local" },
+  { id: "hidream-o1-dev", label: "HiDream O1 Dev", note: "Local" },
 ];
 const MOTION_PRESETS: Array<{ id: MotionPreset; label: string; prompt: string }> = [
   { id: "auto", label: "自动镜头", prompt: "Use natural cinematic motion that best fits the scene." },
@@ -161,6 +162,10 @@ const ERROR_TEXT_ZH: Record<string, string> = {
   IDEOGRAM_NF4_REQUIRES_CUDA: "Ideogram 4 nf4 需要 CUDA 显卡环境。当前是 CPU 环境，请改用 Ideogram 4 fp8 或切换到 CUDA 版 Python/PyTorch。",
   IDEOGRAM_INFERENCE_FAILED: "Ideogram 4 本地推理失败，请检查 Python 环境、显存和模型权限。",
   IDEOGRAM_IMG2IMG_UNSUPPORTED: "Ideogram 4 开源推理仓库目前只提供文生图入口，暂不支持图生图。",
+  HIDREAM_MISSING_MODEL_PATH: "尚未配置 HIDREAM_MODEL_PATH，请在 .env 中指定模型路径后重启服务。",
+  HIDREAM_NOT_INSTALLED: "HiDream 推理环境未安装。请先在 vendor/hidream 中执行 pip install -r requirements.txt。",
+  HIDREAM_CUDA_REQUIRED: "HiDream 需要 CUDA 显卡环境。请确认 GPU 可用。",
+  HIDREAM_INFERENCE_FAILED: "HiDream 推理失败，请检查模型路径、显存和 Python 环境。",
   DOWNLOAD_FAILED: "下载生成结果失败，请稍后重试。",
 };
 
@@ -256,11 +261,14 @@ function statusLabel(status: string): string {
     case "submitting":
       return "提交中";
     case "processing":
+    case "running":
+    case "tracking":
+    case "delayed":
       return "生成中";
     case "downloading":
       return "即将完成";
     case "timeout":
-      return "查询超时";
+      return "生成中";
     default:
       return "生成中";
   }
@@ -424,6 +432,11 @@ function WorkflowNode({ id, data }: NodeProps<WorkNode>) {
             <Icon name={meta.icon} />
             <span>生成失败</span>
             <p>{data.error}</p>
+          </div>
+        ) : data.busy ? (
+          <div className="node-blank generating">
+            <Icon name={meta.icon} />
+            <span>生成中</span>
           </div>
         ) : data.result ? (
           <div className="node-result-card">
@@ -939,35 +952,17 @@ function WorkflowCanvas() {
           });
           return;
         }
-        // timeout with canResume: stop polling and show resume button
-        if (task.status === "timeout") {
-          if (task.canResume) {
-            update(nodeId, {
-              busy: false,
-              result: "查询超时",
-              error: "",
-              canResume: true,
-              lastProviderStatus: task.lastProviderStatus ?? null,
-            });
-            return;
-          }
-          update(nodeId, {
-            busy: false,
-            result: `提交超时：${localizeError(task.errorCode ?? task.error ?? "AGNES_REQUEST_TIMEOUT")}`,
-            error: "",
-            canResume: false,
-            lastProviderStatus: task.lastProviderStatus ?? null,
-          });
-          return;
-        }
-        if (attempt < VIDEO_POLL_MAX_ATTEMPTS) {
-          update(nodeId, { busy: true, result: statusLabel(task.status ?? "processing") });
-          pollTask(nodeId, taskId, attempt + 1);
-        } else {
-          update(nodeId, { busy: false, error: "视频生成超时，请稍后刷新任务或重试。" });
-        }
-      } catch (error) {
-        update(nodeId, { busy: false, error: error instanceof Error ? localizeError(error.message) : "查询视频任务失败" });
+        update(nodeId, {
+          busy: true,
+          result: statusLabel(task.status ?? "processing"),
+          error: "",
+          canResume: false,
+          lastProviderStatus: task.lastProviderStatus ?? task.status ?? null,
+        });
+        pollTask(nodeId, taskId, attempt + 1);
+      } catch {
+        update(nodeId, { busy: true, result: "生成中", error: "" });
+        pollTask(nodeId, taskId, attempt + 1);
       }
     }, VIDEO_POLL_INTERVAL_MS);
   }, [update]);
@@ -1003,7 +998,7 @@ function WorkflowCanvas() {
     if (node.data.kind === "text" && !configRef.current.agnesConfigured) return update(id, { error: "请先在 .env 中配置 AGNES_API_KEY。" });
     if ((node.data.kind === "image" || node.data.kind === "video") && !configRef.current.agnesConfigured) return update(id, { error: "请先在 .env 中配置 AGNES_API_KEY。" });
 
-    update(id, { busy: true, error: "", result: node.data.kind === "video" ? "排队中" : undefined });
+    update(id, { busy: true, error: "", result: undefined });
     try {
       let response: Response;
       if (node.data.kind === "text") {
@@ -1064,7 +1059,7 @@ function WorkflowCanvas() {
       const body = await readJson(response);
       if (!response.ok) throw new Error(responseError(body, "UNKNOWN_ERROR"));
       if (node.data.kind === "video") {
-        update(id, { busy: true, taskId: body.id, result: "排队中" });
+        update(id, { busy: true, taskId: body.id, result: undefined });
         pollTask(id, body.id);
       } else {
         update(id, { busy: false, result: body.text, url: body.outputUrl, error: "" });
@@ -1308,24 +1303,7 @@ function WorkflowCanvas() {
           };
         }
 
-        if (task.status === "timeout") {
-          changed = true;
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              busy: false,
-              result: task.canResume
-                ? "查询超时"
-                : `提交超时：${localizeError(task.errorCode ?? task.error ?? "AGNES_REQUEST_TIMEOUT")}`,
-              error: "",
-              canResume: Boolean(task.canResume),
-              lastProviderStatus: task.lastProviderStatus ?? null,
-            },
-          };
-        }
-
-        if (["pending", "submitting", "queued", "processing", "running", "downloading"].includes(task.status)) {
+        if (["pending", "submitting", "queued", "processing", "running", "downloading", "tracking", "delayed", "timeout"].includes(task.status)) {
           changed = true;
           polling.push({ nodeId: node.id, taskId: node.data.taskId });
           return {
