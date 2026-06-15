@@ -60,6 +60,7 @@ type WorkData = {
   motionPreset?: MotionPreset;
   duration: number;
   settingsOpen?: boolean;
+  promptOpen?: boolean;
   negativePrompt?: string;
   negativePromptOpen?: boolean;
   url?: string;
@@ -449,7 +450,7 @@ function WorkflowNode({ id, data }: NodeProps<WorkNode>) {
         )}
       </div>
       {!isMedia && (
-        <div className="prompt-pop nodrag" onMouseDown={(event) => event.stopPropagation()}>
+        <div className={`prompt-pop nodrag${data.promptOpen ? " open" : ""}`} onMouseDown={(event) => event.stopPropagation()}>
           {(data.kind === "image" || data.kind === "video") && (
             <div className="frame-strip">
               <span className="prompt-tool-square" onClick={() => { if (data.kind === "video") setMotionOpen(!motionOpen); else startFramePicker.current?.click(); }} style={{ cursor: "pointer" }}>
@@ -609,7 +610,7 @@ function WorkflowCanvas() {
   const reactFlow = useReactFlow();
   const searchParams = useSearchParams();
   const requestedProjectId = searchParams.get("project");
-  const { zoom } = useViewport();
+  const { x: viewportX, y: viewportY, zoom } = useViewport();
   const [nodes, setNodes, onNodesChange] = useNodesState<WorkNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [menu, setMenu] = useState<MenuState>();
@@ -659,6 +660,18 @@ function WorkflowCanvas() {
   const agentImagePicker = useRef<HTMLInputElement>(null);
   const agentVideoPicker = useRef<HTMLInputElement>(null);
   const visibleSuggestions = useMemo(() => [0, 1, 2].map((index) => SUGGESTIONS[(suggestionOffset + index) % SUGGESTIONS.length]), [suggestionOffset]);
+  const selectionSourceIdsRef = useRef<string[]>([]);
+  const selectionBounds = useMemo(() => {
+    if (selectedIds.length < 2) return null;
+    const selectedNodes = nodes.filter((n) => selectedIds.includes(n.id) && n.type === "work");
+    if (selectedNodes.length < 2) return null;
+    const pad = 16;
+    const minX = Math.min(...selectedNodes.map((node) => node.position.x)) - pad;
+    const minY = Math.min(...selectedNodes.map((node) => node.position.y - 44)) - pad;
+    const maxX = Math.max(...selectedNodes.map((node) => node.position.x + (node.measured?.width ?? 340))) + pad;
+    const maxY = Math.max(...selectedNodes.map((node) => node.position.y + (node.measured?.height ?? 220))) + pad;
+    return { x: minX * zoom + viewportX, y: minY * zoom + viewportY, width: (maxX - minX) * zoom, height: (maxY - minY) * zoom };
+  }, [selectedIds, nodes, zoom, viewportX, viewportY]);
 
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
@@ -1119,9 +1132,20 @@ function WorkflowCanvas() {
         generate,
       },
     }]);
-    if (sourceId) fanOutGroupConnection(sourceId, id);
+    if (sourceId === "__selection__") {
+      const sourceIds = selectionSourceIdsRef.current;
+      if (sourceIds.length) {
+        markUnsaved();
+        setEdges((current) => sourceIds.reduce(
+          (next, memberId) => addEdge({ id: `${memberId}-${id}-${crypto.randomUUID()}`, source: memberId, target: id, animated: true }, next),
+          current,
+        ));
+      }
+    } else if (sourceId) {
+      fanOutGroupConnection(sourceId, id);
+    }
     setMenu(undefined);
-  }, [fanOutGroupConnection, generate, markUnsaved, reactFlow, remove, setNodes, update, uploadCanvasFile]);
+  }, [fanOutGroupConnection, generate, markUnsaved, reactFlow, remove, setEdges, setNodes, update, uploadCanvasFile]);
 
   const openMenu = useCallback((x: number, y: number, sourceId?: string) => setMenu({ screen: { x, y }, flow: reactFlow.screenToFlowPosition({ x, y }), sourceId }), [reactFlow]);
   const onConnect = useCallback((connection: Connection) => {
@@ -1150,13 +1174,16 @@ function WorkflowCanvas() {
   const focusNode = useCallback((event: React.MouseEvent, node: WorkNode) => {
     const target = event.target as HTMLElement;
     if (target.closest(".nodrag, button, textarea, input, video, a")) return;
-    reactFlow.fitView({
-      nodes: [{ id: node.id }],
-      duration: 360,
-      padding: 0.58,
-      maxZoom: 1.12,
-    });
-  }, [reactFlow]);
+    if (node.data.kind !== "group" && !node.data.kind.startsWith("media-")) {
+      setNodes((current) => current.map((item) => ({
+        ...item,
+        data: {
+          ...item.data,
+          promptOpen: item.id === node.id,
+        },
+      })));
+    }
+  }, [setNodes]);
   const openNodeContextMenu = useCallback((event: React.MouseEvent, node: WorkNode) => {
     event.preventDefault();
     const selection = selectedIds.includes(node.id) ? selectedIds : [node.id];
@@ -1172,6 +1199,14 @@ function WorkflowCanvas() {
     });
     if (selection.length !== selectedIds.length) setSelectedIds(selection);
   }, [reactFlow, selectedIds, setNodes]);
+
+  const onSelectionPortClick = useCallback((side: "left" | "right") => {
+    selectionSourceIdsRef.current = selectedIds;
+    if (!selectionBounds) return;
+    const x = side === "left" ? selectionBounds.x : selectionBounds.x + selectionBounds.width;
+    const y = selectionBounds.y + selectionBounds.height / 2;
+    openMenu(x, y, "__selection__");
+  }, [selectedIds, selectionBounds, openMenu]);
 
   const canvasProjectData = useCallback(() => {
     const storedNodes = nodesRef.current.map((node) => {
@@ -1545,7 +1580,13 @@ function WorkflowCanvas() {
         onNodeContextMenu={openNodeContextMenu}
         onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
         onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest(".react-flow__node")) openMenu(event.clientX, event.clientY); }}
-        onPaneClick={() => { setMenu(undefined); setNodeContextMenu(undefined); }}
+        onPaneClick={() => {
+          setMenu(undefined);
+          setNodeContextMenu(undefined);
+          setNodes((current) => current.map((item) => item.data.promptOpen
+            ? { ...item, data: { ...item.data, promptOpen: false } }
+            : item));
+        }}
         selectionOnDrag
         selectionMode={SelectionMode.Partial}
         panOnDrag={[1]}
@@ -1571,9 +1612,21 @@ function WorkflowCanvas() {
         {nodes.length === 0 && <Panel position="top-center" className="empty-canvas"><Icon name="plus" /><b>双击画布开始创作</b><span>添加文字、图片或视频生成节点</span></Panel>}
       </ReactFlow>
 
+      {selectionBounds && selectedIds.length >= 2 && (
+        <div style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 60 }}>
+          <div className="selection-border" style={{ left: selectionBounds.x, top: selectionBounds.y, width: selectionBounds.width, height: selectionBounds.height }} />
+          <div className="selection-toolbar" style={{ left: selectionBounds.x + selectionBounds.width / 2, top: selectionBounds.y - 52 }}>
+            <span className="selection-count">{selectedIds.length} 个节点</span>
+            <button onClick={() => groupCanvasSelection()}><Icon name="grid" />打组</button>
+          </div>
+          <div className="selection-port left" style={{ left: selectionBounds.x - 16, top: selectionBounds.y + selectionBounds.height / 2 }} onClick={() => onSelectionPortClick("left")}>+</div>
+          <div className="selection-port right" style={{ left: selectionBounds.x + selectionBounds.width - 16, top: selectionBounds.y + selectionBounds.height / 2 }} onClick={() => onSelectionPortClick("right")}>+</div>
+        </div>
+      )}
+
       {menu && (
         <div className="node-menu glass" style={{ left: menu.screen.x, top: menu.screen.y }}>
-          <header><b>{menu.sourceId ? "连接到新节点" : "添加节点"}</b><button onClick={() => setMenu(undefined)}><Icon name="close" /></button></header>
+          <header><b>{menu.sourceId === "__selection__" ? "从选区连接到新节点" : menu.sourceId ? "连接到新节点" : "添加节点"}</b><button onClick={() => setMenu(undefined)}><Icon name="close" /></button></header>
           <button onClick={() => addNode("image", menu.flow, undefined, menu.sourceId)}><Icon name="image" /><span><b>图像</b><em>Agnes Image 2.1 Flash</em></span><Icon name="plus" /></button>
           <button onClick={() => addNode("video", menu.flow, undefined, menu.sourceId)}><Icon name="video" /><span><b>视频</b><em>文本或图片 + 提示词</em></span><Icon name="plus" /></button>
           <button onClick={() => addNode("text", menu.flow, undefined, menu.sourceId)}><Icon name="text" /><span><b>文本</b><em>GPT-5.5</em></span><Icon name="plus" /></button>

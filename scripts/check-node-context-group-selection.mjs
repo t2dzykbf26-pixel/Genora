@@ -16,7 +16,14 @@ assert.match(page, /fanOutGroupConnection/);
 assert.match(page, /selectionOnDrag/);
 assert.match(page, /selectionMode=\{SelectionMode\.Partial\}/);
 assert.match(page, /panOnDrag=\{\[1\]\}/);
+assert.doesNotMatch(page, /className="prompt-toggle/);
+assert.match(page, /node\.data\.kind !== "group" && !node\.data\.kind\.startsWith\("media-"\)/);
+assert.match(page, /promptOpen:\s*item\.id === node\.id/);
+assert.match(page, /onPaneClick=\{\(\) => \{[\s\S]*promptOpen:\s*false/);
 assert.match(css, /\.node-context-menu/);
 assert.match(css, /\.canvas-node\.group/);
+assert.doesNotMatch(css, /\.canvas-node:hover \.prompt-pop/);
+assert.doesNotMatch(css, /\.prompt-pop:hover/);
+assert.match(css, /\.selection-border\{[^}]*linear-gradient/);
 
 console.log("Node context, group, and selection checks passed.");
