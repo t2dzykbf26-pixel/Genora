@@ -3,6 +3,7 @@ node_modules/
 
 # Next.js build output
 .next/
+.next-dev/
 .next-build/
 out/
 
@@ -36,9 +37,18 @@ pnpm-debug.log*
 .vscode/
 .idea/
 
+# Codex dev logs
+.codex-dev.*
+.codex-next-*
+dev-*.log
+dev-server-*.log
+prod-server-*.log
+next-*.log
+
 # Local workspace artifacts
 .agents
 .venv-ideogram/
+.venv-hidream/
 vendor/
 
 # Netlify build artifacts
