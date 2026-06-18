@@ -184,7 +184,8 @@ function findValue(value: unknown, keys: Set<string>): unknown {
 }
 
 export async function createAgnesVideo(payload: Record<string, unknown>) {
-  videoLog("create-video", { model: String(payload.model ?? ""), width: String(payload.width ?? ""), height: String(payload.height ?? ""), frames: String(payload.num_frames ?? "") });
+  const payloadJson = JSON.stringify(payload);
+  videoLog("create-video", { model: String(payload.model ?? ""), width: String(payload.width ?? ""), height: String(payload.height ?? ""), frames: String(payload.num_frames ?? ""), payloadBytes: String(payloadJson.length), hasImage: String(payload.image ? "true" : "false") });
   const timeoutMs = Number.isFinite(VIDEO_CREATE_TIMEOUT_MS) && VIDEO_CREATE_TIMEOUT_MS > 0 ? VIDEO_CREATE_TIMEOUT_MS : 300_000;
   const result = await request(`${API_BASE}/videos`, "video", {
     method: "POST",

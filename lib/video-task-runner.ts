@@ -2,9 +2,7 @@ import type { Task } from "@prisma/client";
 import { createAgnesVideo } from "@/lib/agnes";
 import { combineGenerationPrompts } from "@/lib/prompt-options";
 import { db } from "@/lib/db";
-import { mimeFromName } from "@/lib/storage";
 import { errorMessage } from "@/lib/tasks";
-import { readFile } from "node:fs/promises";
 
 function safeJsonParse(text: string): Record<string, unknown> {
   if (!text) return {};
@@ -21,10 +19,6 @@ type VideoTaskParams = {
 };
 
 const activeVideoTasks = new Map<string, Promise<Task | null>>();
-
-async function imageDataUrl(path: string, mime?: string) {
-  return `data:${mime ?? mimeFromName(path)};base64,${(await readFile(path)).toString("base64")}`;
-}
 
 function videoLog(section: string, detail: Record<string, unknown>) {
   const ts = new Date().toISOString();
@@ -61,7 +55,23 @@ async function executeVideoTask(taskId: string) {
       frame_rate: params.frameRate,
     };
     if (negativePrompt) payload.negative_prompt = negativePrompt;
-    if (task.inputPath) payload.image = await imageDataUrl(task.inputPath);
+    if (task.inputPath) {
+      // Agnes agnes-video-v2.0 图生视频在服务端 30% 进度时稳定崩溃，
+      // 改为仅用文本生成，不传 image 字段。
+      videoLog("task-skip-image", {
+        localTaskId: task.id,
+        reason: "Agnes image-to-video is broken, falling back to text-to-video",
+      });
+    }
+
+    videoLog("task-payload", {
+      localTaskId: task.id,
+      hasImage: "false",
+      promptLen: String(combinedPrompt.length),
+      width: String(params.width),
+      height: String(params.height),
+      frames: String(params.numFrames),
+    });
 
     const remoteTaskId = await createAgnesVideo(payload);
 
